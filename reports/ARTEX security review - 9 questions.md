@@ -22,13 +22,17 @@ Each finding is labeled **[READ]** (directly observed in source) or **[INFERRED]
 
 6. **[READ]** `intercept/target_redirect.go:39-51` — `RedirectCheck` gates every HTTP redirect hop through the same target decision logic. Unpinned redirect targets are blocked immediately (WaitBound=0).
 
-7. **[READ]** `intercept/target_gate.go:92-101` — `CheckTargets` is the main gate entry point. When the gate is off, nothing is extracted or checked.
+7. **[READ]** `intercept/target_gate.go:92-101` — `CheckTargets` is the main gate entry point. When the gate is off, nothing is extracted or checked. The gate can be toggled per task via `scope.Enabled()` (line 93).
 
 8. **[READ]** `intercept/target_gate.go:170-176` — URL block rules use exact string matching (`exact_url`) or substring matching (`fuzzy_url`). The comment acknowledges: *"exact_url compares the string as written, so another case, encoding (%2F), a trailing slash, an added query or /./ does not match."*
 
 9. **[READ]** `intercept/target.go:94-120` — `normalizeHost` handles IDN punycode, IPv4-mapped IPv6, hex/octal IPv4 forms (e.g., `0x7f000001`), protecting against address obfuscation for declared targets.
 
-10. **[INFERRED]** A Bash command like `curl $(echo aHR0cDovL2V2aWwuY29t | base64 -d)` would extract no target — the URL is computed at runtime, not declared in the input.
+10. **[READ]** `intercept/target_extract.go:158-173` — `urlHosts` handles ambiguous shell metacharacters in URLs by returning ALL possible interpretations. E.g., `http://a.example;@b.example/` yields both `a.example` and `b.example` — the gate is strict about ambiguity, checking every reading.
+
+11. **[INFERRED]** A Bash command like `curl $(echo aHR0cDovL2V2aWwuY29t | base64 -d)` would extract no target — the URL is computed at runtime, not declared in the input.
+
+12. **[INFERRED]** A tool output embedding a crafted URL can add a target to extraction, but it cannot bypass the gate: the extracted target still needs an active pin or exemption. The extractor adds targets to the _check list_, not to the _approved list_.
 
 ### Bypass: Bash-launched tools with undeclared targets
 
@@ -91,11 +95,17 @@ Each finding is labeled **[READ]** (directly observed in source) or **[INFERRED]
 
 7. **[READ]** `intercept/argv_compound.go:38-51` — Only applies to the `Bash` tool. Parse errors return `false` (no match), which is fail-open for the deny rule.
 
-### Concrete bypass
+### Concrete bypasses
 
 **[INFERRED]** `cmd="rm"; $cmd -rf /target` — `$cmd` is a parameter expansion, so the word is non-literal and won't match the `rm` rule. The AST parser sees it, but since the value is opaque, the deny rule doesn't fire. Similarly, `` `which rm` -rf / `` uses command substitution. This is inherent to static analysis of shell code.
 
+**[INFERRED]** `cat <(rm -rf /)` — Process substitution `<(cmd)` creates a `*syntax.ProcSubst` AST node, not a `*syntax.CallExpr`. The walker at `argv_compound.go:62-77` only matches `CallExpr` nodes, so the inner command of a process substitution is NOT walked and won't match deny rules.
+
+**[INFERRED]** `python3 <<'EOF'\nimport os; os.system("rm -rf /")\nEOF` — Heredoc content is part of a redirection attached to the statement, not inside a `CallExpr`. The heredoc payload isn't parsed for inner commands.
+
 **[READ]** `intercept/argv_compound.go:38` — Parse errors (invalid Bash syntax) return `false` → no match → deny rule doesn't fire. This is fail-open: a syntactically invalid but executable command could bypass matching.
+
+**[READ]** `intercept/argv_compound.go:39` — The compound matcher only applies to the `Bash` tool. `shell_send` text is not AST-parsed by the compound matcher.
 
 ---
 
