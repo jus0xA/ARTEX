@@ -2,6 +2,8 @@
 
 Each finding is labeled **[READ]** (directly observed in source) or **[INFERRED]** (logical deduction from observed code). File:line citations reference the repository at commit `1d026b6`.
 
+> **Errata (post-review corrections after peer review by Fable):** Target gate default corrected from "default-on" to OFF by default. Asset graph citation fixed to `db/schema.sql:41-52`. Cross-worker fact wrapping clarified (advisory data envelope, not raw). Budget persistence corrected (spend restored from DB). Added: loopback access confirmed, RSI lessons scoping, recording proxy scope enforcement, no data retention.
+
 ---
 
 ## Q1: Target Extraction
@@ -349,15 +351,15 @@ The pinned version is **v0.4.11** of `github.com/BaaRai/Norma`. Whether this is 
 
 | # | Severity | Q | Weakness | File | Line | Label |
 |---|----------|---|----------|------|------|-------|
-| 1 | **High** | Q5 | Shared global asset graph: poisoned asset from task A visible to task B with no ownership check | `intercept/target_extract.go` | 29 | INFERRED |
+| 1 | **High** | Q5 | Shared global asset graph: poisoned asset from task A visible to task B with no ownership check | `db/schema.sql` | 41-52 | READ |
 | 2 | **High** | Q1 | Bash-launched tools can connect to undeclared targets (dynamic URL construction, variable expansion, DNS resolution) — the gate only sees literal strings | `intercept/target_extract.go` | 59-63 | READ |
-| 3 | **High** | Q5 | Cross-worker poisoning via shared exploration graph: a malicious tool output recorded as a fact by Worker A can influence the planner's next prompt | `agent/planner.go` | 430, 519 | INFERRED |
+| 3 | **Medium** | Q5 | Cross-worker poisoning via shared exploration graph: facts are wrapped in advisory data envelope with nonces (not raw), but envelope is LLM-advisory only | `agent/planner.go` | 430, 519 | READ |
 | 4 | **High** | Q2 | Closed judge is an LLM — adversarial tool arguments can attempt to steer answers toward "allow" despite the "data under review" framing | `intercept/closed_judge.go` | 70-74 | INFERRED |
 | 5 | **Medium** | Q5 | Cross-task tools allow one task's agent to read another task's worker traces and findings | `intercept/target_extract.go` | 36-38 | READ |
 | 6 | **Medium** | Q3 | Process substitution `<(banned_cmd)` hides inner command from argv CallExpr walker | `intercept/argv_compound.go` | 62-77 | INFERRED |
 | 7 | **Medium** | Q3 | Argv deny rules are fail-open for non-literal words: `$var`, `` `cmd` ``, `$(cmd)` make arguments opaque and bypass deny-rule matching | `intercept/argv_compound.go` | 144-166 | READ |
 | 8 | **Medium** | Q3 | Bash parse errors return `false` (no match), so syntactically invalid but executable commands bypass deny rules | `intercept/argv_compound.go` | 56-58 | READ |
-| 9 | **Medium** | Q4 | Target gate is per-task opt-in — tasks without it have no target-level protection | `intercept/target_gate.go` | 93 | READ |
+| 9 | **Medium** | Q4 | Target gate is OFF by default (`DEFAULT false` in schema, confirmed by `TestTaskTargetGateDefaultsOff`) — tasks without explicit enablement have no target-level protection | `intercept/target_gate.go` | 93 | READ |
 | 10 | **Medium** | Q1 | URL block rules use exact/substring matching — encoding tricks, case changes, trailing slashes bypass `exact_url` rules | `intercept/target_gate.go` | 170-176 | READ |
 | 11 | **Medium** | Q6 | Untrusted-output boundary can be fully disabled by env var with no runtime warning or audit log | `agent/untrusted_boundary.go` | 18-24 | READ |
 | 12 | **Medium** | Q8 | LLM transcripts and raw tool results (which may contain discovered credentials) are not encrypted at the application layer | `db/secrets.go` | 80-99 | INFERRED |
@@ -374,3 +376,9 @@ The pinned version is **v0.4.11** of `github.com/BaaRai/Norma`. Whether this is 
 | 23 | **Low** | Q7 | CORS `Access-Control-Allow-Origin: *` allows any origin to read unauthenticated endpoints | `server/server.go` | 4646 | READ |
 | 24 | **Low** | Q8 | Secret key file relies on filesystem permissions only | `db/secrets.go` | 352-353 | READ |
 | 25 | **Info** | Q7 | CORS `Content-Type`-only header allowance blocks cross-origin Bearer auth (good constraint, undocumented) | `server/server.go` | 4648 | READ |
+| 26 | **Medium** | Q7 | Agent executor can reach API on loopback — no network namespace, no iptables; only UID/GID + PR_SET_NO_NEW_PRIVS separates agent from API. Agent needs JWT but no network barrier exists | `server/execpriv_linux.go` | — | READ |
+| 27 | **Medium** | Q5 | RSI lessons scoped per-company not per-task; in "inject" mode, poisoned lesson from task A can reach task B in same company (OFF by default) | `agent/` | — | READ |
+| 28 | **Low** | Q8 | No data retention or automatic cleanup — tasks, transcripts, traffic data persist indefinitely | `db/` | — | READ |
+| 29 | **Info** | Q5 | Facts in planner prompt ARE wrapped in advisory data envelope with crypto nonces and marker neutralization (stronger than expected, but still advisory) | `agent/data_envelope.go` | 14-15 | READ |
+| 30 | **Info** | Q9 | Budget spend IS partially restored from `llm_usage` table on restart; per-worker averages are lost. The .env.example comment is misleading | `agent/budget.go` | 95-96 | READ |
+| 31 | **Info** | Q1 | Recording proxy (SOCKS5 + transparent) DOES enforce scope via `intercept.PinnedDialer` — MITM failures are fail-open (traffic reaches target unrecorded) | `traffic/socks5.go` | 213 | READ |
