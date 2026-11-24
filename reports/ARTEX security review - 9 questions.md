@@ -34,6 +34,14 @@ Each finding is labeled **[READ]** (directly observed in source) or **[INFERRED]
 
 12. **[INFERRED]** A tool output embedding a crafted URL can add a target to extraction, but it cannot bypass the gate: the extracted target still needs an active pin or exemption. The extractor adds targets to the _check list_, not to the _approved list_.
 
+13. **[READ]** `intercept/target_dial.go:217-253` — `PinnedDialer` also covers SOCKS5 proxy connections, not just direct TCP. `target_dial.go:259-277` gates UDP datagrams via `PinnedUDP4Resolver`.
+
+14. **[READ]** `intercept/target_exempt.go:168-177` — `IsNonPublicAddr` blocks RFC1918, fc00::/7, loopback, link-local (including cloud metadata 169.254.169.254), unspecified, and multicast addresses from being used as IP-literal exemptions — SSRF protection.
+
+15. **[READ]** `server/goal_gate.go:29-42` — Tasks must name a target (URL, domain, IPv4, localhost:port, or absolute path) unless the goal contains the literal `[targetless]` marker. Minimum 80 characters. This is the entry-point gate before any agent runs.
+
+16. **[READ]** `server/server.go:77-79` — `modelLookupIP` and `modelDialContext` test seams exist for LLM endpoint connections; production default is strict public-only. Only hosts in `ARTEX_LLM_PRIVATE_ENDPOINTS` may resolve to private addresses — preventing SSRF via LLM base URL.
+
 ### Bypass: Bash-launched tools with undeclared targets
 
 **[INFERRED]** Any Bash command that constructs its target dynamically (variable expansion, base64 decode, DNS lookups via `dig` then `curl` to the IP) will bypass target extraction because the gate only sees the literal command string, not what the shell resolves at runtime.
@@ -45,6 +53,8 @@ Each finding is labeled **[READ]** (directly observed in source) or **[INFERRED]
 **Takeaway:** The judge prompt is hardcoded, the output format is strictly validated, and injection attempts in tool arguments are explicitly treated as "data under review" — but the judge is still an LLM and can be influenced by adversarial content in the arguments.
 
 ### Findings
+
+0. **[READ]** `intercept/intercept.go:478-481` — Two judge modes exist: `JudgeModeClosed = "closed"` (default, used below) and `JudgeModeFreeform = "freeform"` (legacy, less structured). The closed mode is the security-critical path.
 
 1. **[READ]** `intercept/closed_judge.go:33-42` — 8 fixed questions with stable IDs: `read_only`, `availability`, `data_loss`, `credentials_acl`, `live_config`, `dos`, `pentest_action`, `operator_policy`.
 
